@@ -1,4 +1,8 @@
 # comp379Project
+## How to run experiment.py (brackets indicate an optional argument)
+```
+python3 experiment.py -i path/to/dataset -p number/of/processors/to/use [-o output/folder]
+```
 ## Dataset:
 - https://www.kaggle.com/datasets/reihanenamdari/breast-cancer
 ## Goal:
