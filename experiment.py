@@ -43,7 +43,7 @@ if __name__ == "__main__":
     best_model = GridSearchCV(estimator=svm, param_grid=parameters, scoring='f1', verbose=4, n_jobs=int(args.processors), cv=5)
     best_model.fit(X_train, y_train)
 
-    print(f"Best f1-score: {best_score_}")
+    print(f"Best f1-score: {best_model.best_score_}")
     print(f"Best model params: {best_model.best_params_}")
     retrained_best_model = SVC(random_state=random_state, **best_model.best_params_)
     retrained_best_model.fit(X_train, y_train)
