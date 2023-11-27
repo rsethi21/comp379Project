@@ -164,7 +164,7 @@ def stratified_f1(x, truth, predictions, index):
 
     for i in np.unique(values):
         indices = np.where(x[:,index] == i)
-        f1s_neg[i] = f1_score(truth[indices], predictions[indices], pos_label=0)
+        f1s_neg[i] = f1_score(truth[indices], predictions[indices], pos_label=1)
     return f1s_pos, f1s_neg
 
 if __name__ == "__main__":
@@ -182,7 +182,7 @@ if __name__ == "__main__":
     num_epochs = 100
     optim = tf.keras.optimizers.Adam(lr)
     threshold = 0.5
-    db_weight = 0.005
+    db_weight = 0.5
 
     # create model
     model = DebiasedModel(latent_features, args.nodes, len(new_dataset.columns)-1)

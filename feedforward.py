@@ -20,7 +20,7 @@ parser.add_argument("-i", "--input", help="input path to diabetes file", require
 parser.add_argument("-p", "--predictor", help="name of prediction column", required=True)
 parser.add_argument("-s", "--scale", help="columns to scale", nargs="*", required=False, default=[])
 parser.add_argument("-n", "--nodes", help="list of hidden layer nodes", nargs="*", required=True, type=int)
-parser.add_argument("-o", "--ouput", help="number of output nodes", required=False, type=int, default=0)
+parser.add_argument("-o", "--output", help="number of output nodes", required=False, type=int, default=1)
 
 class Dataset:
     def __init__(self, filepath, predictor, scale_columns, split=0.2, rs = 2023):
@@ -70,8 +70,8 @@ class FFM(tf.keras.Model):
 
     @classmethod
     def custom_loss(cls, y, yhat):
-        classification_loss = tf.nn.CategoricalCrossentropy(y.reshape(-1, 1), yhat)
-        return classification_loss
+        classification_loss = tf.keras.losses.BinaryCrossentropy(from_logits=False)
+        return classification_loss(y.reshape(-1, 1), yhat)
 
     def train(self, x, y, optimizer):
         with tf.GradientTape() as tape:
@@ -83,12 +83,17 @@ class FFM(tf.keras.Model):
 
 def stratified_f1(x, truth, predictions, index):
 
-    f1s = {}
+    f1s_pos = {}
+    f1s_neg = {}
     values = x[:,index]
     for i in np.unique(values):
         indices = np.where(x[:,index] == i)
-        f1s[i] = f1_score(truth[indices], predictions[indices])
-    return f1s
+        f1s_pos[i] = f1_score(truth[indices], predictions[indices], pos_label=1)
+
+    for i in np.unique(values):
+        indices = np.where(x[:,index] == i)
+        f1s_neg[i] = f1_score(truth[indices], predictions[indices], pos_label=0)
+    return f1s_pos, f1s_neg
 
 if __name__ == "__main__":
 
@@ -109,7 +114,6 @@ if __name__ == "__main__":
     model = FFM(args.nodes, args.output)
     
     # training loop
-    loss = 0
     for epoch in range(num_epochs):
         print(f"Epoch {epoch+1} of {num_epochs}")
         xs, ys = new_dataset.prepare_batches(batches)
