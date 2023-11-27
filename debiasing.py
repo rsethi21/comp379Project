@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import tensorflow as tf
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, f1_score, accuracy_score
 from sklearn.utils import shuffle
 import pdb
 
@@ -109,7 +110,7 @@ class DebiasedModel(tf.keras.Model):
         return mean + tf.math.exp(0.5 * sigma) * epsilon
 
     @classmethod
-    def custom_loss(cls, x, xhat, y, yhat, mu, sigma, debias_weight=0.0005):
+    def custom_loss(cls, x, xhat, y, yhat, mu, sigma, debias_weight):
         latent_normalization_loss = 0.5 * tf.reduce_sum(tf.exp(sigma) + tf.square(mu) - 1.0 - sigma, axis=1)
         reconstruction_loss = tf.reduce_mean(tf.abs(x-xhat), axis=1)
         classification_loss = tf.nn.sigmoid_cross_entropy_with_logits(y.reshape(-1, 1), yhat)
@@ -144,16 +145,22 @@ class DebiasedModel(tf.keras.Model):
 
         return training_sample_p
 
-    def train(self, x, y, optimizer):
+    def train(self, x, y, optimizer, weight):
         with tf.GradientTape() as tape:
             yhat, mean, sigma, xhat = self.run(x)
-            loss, class_loss = DebiasedModel.custom_loss(x, xhat, y.astype('float32'), yhat, mean, sigma)
+            loss, class_loss = DebiasedModel.custom_loss(x, xhat, y.astype('float32'), yhat, mean, sigma, weight)
         gradients = tape.gradient(loss, self.trainable_variables)
         optimizer.apply_gradients(zip(gradients, self.trainable_variables))
         return loss
-    
-    def save():
-        pass
+
+def stratified_f1(x, truth, predictions, index):
+
+    f1s = {}
+    values = x[:,index]
+    for i in np.unique(values):
+        indices = np.where(x[:,index] == i)
+        f1s[i] = f1_score(truth[indices], predictions[indices])
+    return f1s
 
 if __name__ == "__main__":
 
@@ -164,20 +171,31 @@ if __name__ == "__main__":
     new_dataset = Dataset(args.input, args.predictor, args.scale)
     
     # set hyperparameters
-    batches = 21
+    batches = 100
     lr = 0.0001
-    latent_features = 3 # hx, sx, ses
-    num_epochs = 50
+    latent_features = 4 # hx, sx, ses, demographics
+    num_epochs = 100
     optim = tf.keras.optimizers.Adam(lr)
+    threshold = 0.5
+    db_weight = 0.005
 
     # create model
     model = DebiasedModel(latent_features, args.nodes, len(new_dataset.columns)-1)
     
     # training loop
+    loss = 0
     for epoch in range(num_epochs):
         print(f"Epoch {epoch+1} of {num_epochs}")
         probs = model.extract_distributions(new_dataset, latent_features, batches)
         xs, ys = new_dataset.prepare_batches(batches, probs)
-        for batch_x, batch_y in zip(xs, ys): # apply np.random_choice and its non-uniform probabilities
-            loss = model.train(batch_x, batch_y, optim)
-            print(loss)
+        for batch_x, batch_y in tqdm(zip(xs, ys)): # apply np.random_choice and its non-uniform probabilities
+            loss = model.train(batch_x, batch_y, optim, db_weight)
+        print(f"Latest loss: {loss}")
+    
+    # Evaluate model
+    predictions = tf.squeeze(tf.sigmoid(model.predict(new_dataset.X_test)))
+    predictions = np.array([0 if p < threshold else 1 for p in predictions])
+    print(accuracy_score(new_dataset.y_test, predictions))
+    print(f1_score(new_dataset.y_test, predictions))
+    print(stratified_f1(new_dataset.X_test, new_dataset.y_test, predictions, 20))
+    model.save_weights("model_weights/dbvae")
