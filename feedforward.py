@@ -20,6 +20,7 @@ parser.add_argument("-i", "--input", help="input path to diabetes file", require
 parser.add_argument("-p", "--predictor", help="name of prediction column", required=True)
 parser.add_argument("-s", "--scale", help="columns to scale", nargs="*", required=False, default=[])
 parser.add_argument("-n", "--nodes", help="list of hidden layer nodes", nargs="*", required=True, type=int)
+parser.add_argument("-o", "--ouput", help="number of output nodes", required=False, type=int, default=0)
 
 class Dataset:
     def __init__(self, filepath, predictor, scale_columns, split=0.2, rs = 2023):
@@ -105,7 +106,7 @@ if __name__ == "__main__":
     threshold = 0.5
 
     # create model
-    model = FFM(args.nodes)
+    model = FFM(args.nodes, args.output)
     
     # training loop
     loss = 0
