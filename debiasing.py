@@ -155,12 +155,17 @@ class DebiasedModel(tf.keras.Model):
 
 def stratified_f1(x, truth, predictions, index):
 
-    f1s = {}
+    f1s_pos = {}
+    f1s_neg = {}
     values = x[:,index]
     for i in np.unique(values):
         indices = np.where(x[:,index] == i)
-        f1s[i] = f1_score(truth[indices], predictions[indices])
-    return f1s
+        f1s_pos[i] = f1_score(truth[indices], predictions[indices], pos_label=1)
+
+    for i in np.unique(values):
+        indices = np.where(x[:,index] == i)
+        f1s_neg[i] = f1_score(truth[indices], predictions[indices], pos_label=0)
+    return f1s_pos, f1s_neg
 
 if __name__ == "__main__":
 
