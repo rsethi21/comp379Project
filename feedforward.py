@@ -23,7 +23,7 @@ parser.add_argument("-n", "--nodes", help="list of hidden layer nodes", nargs="*
 parser.add_argument("-o", "--output", help="number of output nodes", required=False, type=int, default=1)
 
 class Dataset:
-    def __init__(self, filepath, predictor, scale_columns, split=0.2, rs = 2023):
+    def __init__(self, filepath, predictor, scale_columns, split=0.2, rs = 4):
         self.rs = rs
         self.open_dataset(filepath)
         self.scale_data(scale_columns)
@@ -38,7 +38,7 @@ class Dataset:
         data = data.sample(frac=1, random_state=self.rs)
         y = data.loc[:,predictor].to_numpy()
         X = data.drop(columns=[predictor]).to_numpy()
-        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, random_state=self.rs, test_size=split)
+        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, random_state=self.rs, test_size=split, stratify=y)
 
     def scale_data(self, columns):
         scaler = MinMaxScaler()
@@ -66,7 +66,7 @@ class FFM(tf.keras.Model):
     
     def predict(self, x):
         yhat = self.encode(x)
-        return yhat
+        return tf.squeeze(yhat)
 
     @classmethod
     def custom_loss(cls, y, yhat):
@@ -122,9 +122,11 @@ if __name__ == "__main__":
         print(f"Latest loss: {loss}")
     
     # Evaluate model
-    predictions = tf.squeeze(model.predict(new_dataset.X_test))
+    predictions = model.predict(new_dataset.X_test)
     predictions = np.array([0 if p < threshold else 1 for p in predictions])
     print(accuracy_score(new_dataset.y_test, predictions))
     print(f1_score(new_dataset.y_test, predictions))
     print(stratified_f1(new_dataset.X_test, new_dataset.y_test, predictions, 20))
     model.save_weights("model_weights_2/ff")
+    for name, df in zip(["./data_ff/X_train.csv", "./data_ff/X_test.csv", "./data_ff/y_train.csv", "./data_ff/y_test.csv", "./data_ff/y_predict.csv"], [new_dataset.X_train, new_dataset.X_test, new_dataset.y_train, new_dataset.y_test, pd.DataFrame(predictions)]):
+        pd.DataFrame(df).to_csv(name)

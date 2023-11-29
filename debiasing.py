@@ -21,10 +21,9 @@ parser = argparse.ArgumentParser()
 parser.add_argument("-i", "--input", help="input path to diabetes file", required=True)
 parser.add_argument("-p", "--predictor", help="name of prediction column", required=True)
 parser.add_argument("-s", "--scale", help="columns to scale", nargs="*", required=False, default=[])
-parser.add_argument("-n", "--nodes", help="list of hidden layer nodes", nargs="*", required=True, type=int)
 
 class Dataset:
-    def __init__(self, filepath, predictor, scale_columns, split=0.2, rs = 2023):
+    def __init__(self, filepath, predictor, scale_columns, split=0.2, rs = 4):
         self.rs = rs
         self.open_dataset(filepath)
         self.scale_data(scale_columns)
@@ -39,21 +38,35 @@ class Dataset:
         data = data.sample(frac=1, random_state=self.rs)
         y = data.loc[:,predictor].to_numpy()
         X = data.drop(columns=[predictor]).to_numpy()
-        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, random_state=self.rs, test_size=split)
+        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, random_state=self.rs, test_size=split, stratify=y)
 
     def scale_data(self, columns):
         scaler = MinMaxScaler()
         self.data.loc[:,columns] = scaler.fit_transform(self.data.loc[:,columns])
         self.scaler = scaler
 
-    def prepare_batches(self, batch_size, probability):
+    def get_positive_indices(self, return_data=False):
+        self.pos_indices = np.where(self.y_train == 1.0)[0]
+        if return_data:
+            return self.X_train[self.pos_indices]
+
+    def get_negative_indices(self, return_data=False):
+        self.neg_indices = np.where(self.y_train == 0.0)[0]
+        if return_data:
+            return self.X_train[self.neg_indices]
+
+    def prepare_batches(self, batch_size, pos_probability = None, neg_probability = None):
         if len(self.X_train) % batch_size != 0:
             assert(f"Training set of length {len(self.X_train)} is not divisible by {batch_size}. Choose a different batch size if you would like to incoporate all data samples in training.")
-        all_indices = range(len(self.X_train))
         X_batches = []
         y_batches = []
+        pi = self.pos_indices
+        ni = self.neg_indices
+        num_samples = len(self.X_train) // batch_size
         for _ in range(batch_size):
-            selected_indices = np.random.choice(all_indices, size=len(all_indices)//batch_size, replace=False, p=probability)
+            selected__pos_indices = np.random.choice(pi, size=num_samples//2, replace=False, p=pos_probability)
+            selected_neg_indices = np.random.choice(ni, size=num_samples//2, replace=False, p=neg_probability)
+            selected_indices = np.sort(np.concatenate((selected__pos_indices, selected_neg_indices)))
             X_batches.append(self.X_train[selected_indices])
             y_batches.append(self.y_train[selected_indices])
         return X_batches, y_batches
@@ -99,7 +112,7 @@ class DebiasedModel(tf.keras.Model):
     
     def predict(self, x):
         yhat, means, sigmas = self.encode(x)
-        return yhat
+        return tf.squeeze(tf.sigmoid(yhat))
 
     def extract_latent_vector(self, means, sigmas):
         return DebiasedModel.sampling(means, sigmas)
@@ -118,11 +131,11 @@ class DebiasedModel(tf.keras.Model):
         total_loss = tf.reduce_mean(classification_loss + vae_loss)
         return total_loss, classification_loss
 
-    def extract_distributions(self, dataset, latent_dim, num_batches):
-        mu = np.zeros((len(dataset.X_train), latent_dim))
-        for start_i in range(0, len(dataset.X_train), len(dataset.X_train)//num_batches):
-            end_i = min(start_i+len(dataset.X_train)//num_batches, len(dataset.X_train)+1)
-            _, batch_mu, _ = self.encode(dataset.X_train[start_i:end_i])
+    def extract_distributions(self, data, latent_dim, num_batches):
+        mu = np.zeros((len(data), latent_dim))
+        for start_i in range(0, len(data), len(data)//num_batches):
+            end_i = min(start_i+len(data)//num_batches, len(data)+1)
+            _, batch_mu, _ = self.encode(data[start_i:end_i])
             mu[start_i:end_i] = batch_mu
 
         training_sample_p = np.zeros(mu.shape[0])
@@ -145,6 +158,17 @@ class DebiasedModel(tf.keras.Model):
 
         return training_sample_p
 
+    def stratied_train(self, x, y, optimizer, weight):
+        with tf.GradientTape() as tape:
+            yhat_p, mean_p, sigma_p, xhat_p = self.run(x[np.where(y == 1)[0]])
+            yhat_n, mean_n, sigma_n, xhat_n = self.run(x[np.where(y == 0)[0]])
+            loss_p, class_loss_p = DebiasedModel.custom_loss(x[np.where(y == 1)[0]], xhat_p, y[np.where(y==1)[0]].astype('float32'), yhat_p, mean_p, sigma_p, weight)
+            loss_n, class_loss_n = DebiasedModel.custom_loss(x[np.where(y == 0)[0]], xhat_n, y[np.where(y==0)[0]].astype('float32'), yhat_n, mean_n, sigma_n, weight)
+            loss = tf.reduce_mean(loss_p + loss_n)
+        gradients = tape.gradient(loss, self.trainable_variables)
+        optimizer.apply_gradients(zip(gradients, self.trainable_variables))
+        return loss
+
     def train(self, x, y, optimizer, weight):
         with tf.GradientTape() as tape:
             yhat, mean, sigma, xhat = self.run(x)
@@ -152,6 +176,20 @@ class DebiasedModel(tf.keras.Model):
         gradients = tape.gradient(loss, self.trainable_variables)
         optimizer.apply_gradients(zip(gradients, self.trainable_variables))
         return loss
+    
+    def fit(self, num_epochs, new_dataset, batches, latent_features, optim, db_weight):
+        loss = 0
+        for epoch in tqdm(range(num_epochs), desc="Epoch"):
+            pos_probs = self.extract_distributions(new_dataset.get_positive_indices(return_data=True), latent_features, batches)
+            neg_probs = self.extract_distributions(new_dataset.get_negative_indices(return_data=True), latent_features, batches)
+            xs, ys = new_dataset.prepare_batches(batches, pos_probability=pos_probs, neg_probability=neg_probs)
+            for batch_x, batch_y in zip(xs, ys): # apply np.random_choice and its non-uniform probabilities
+                loss = self.train(batch_x, batch_y, optim, db_weight)
+        print(f"Final loss: {loss}")
+
+
+def search(model, data, hl, **hyperparameters):
+    pass
 
 def stratified_f1(x, truth, predictions, index):
 
@@ -164,7 +202,7 @@ def stratified_f1(x, truth, predictions, index):
 
     for i in np.unique(values):
         indices = np.where(x[:,index] == i)
-        f1s_neg[i] = f1_score(truth[indices], predictions[indices], pos_label=1)
+        f1s_neg[i] = f1_score(truth[indices], predictions[indices], pos_label=0)
     return f1s_pos, f1s_neg
 
 if __name__ == "__main__":
@@ -182,25 +220,21 @@ if __name__ == "__main__":
     num_epochs = 100
     optim = tf.keras.optimizers.Adam(lr)
     threshold = 0.5
-    db_weight = 0.5
+    db_weight = 0.0005
+    hl = [18, 15, 12, 9]
 
     # create model
-    model = DebiasedModel(latent_features, args.nodes, len(new_dataset.columns)-1)
-    
-    # training loop
-    loss = 0
-    for epoch in range(num_epochs):
-        print(f"Epoch {epoch+1} of {num_epochs}")
-        probs = model.extract_distributions(new_dataset, latent_features, batches)
-        xs, ys = new_dataset.prepare_batches(batches, probs)
-        for batch_x, batch_y in tqdm(zip(xs, ys)): # apply np.random_choice and its non-uniform probabilities
-            loss = model.train(batch_x, batch_y, optim, db_weight)
-        print(f"Latest loss: {loss}")
+    model = DebiasedModel(latent_features, hl, len(new_dataset.columns)-1)
+    model.fit(num_epochs, new_dataset, batches, latent_features, optim, db_weight)
+    # current approach takes the normalized overall latent space and extracts distribution of latent space for each indicator from that overall distribution
+    # possible extension is to map the latent space distribution for each one normally and then pick probabilities
     
     # Evaluate model
-    predictions = tf.squeeze(tf.sigmoid(model.predict(new_dataset.X_test)))
+    predictions = model.predict(new_dataset.X_test)
     predictions = np.array([0 if p < threshold else 1 for p in predictions])
     print(accuracy_score(new_dataset.y_test, predictions))
     print(f1_score(new_dataset.y_test, predictions))
     print(stratified_f1(new_dataset.X_test, new_dataset.y_test, predictions, 20))
     model.save_weights("model_weights/dbvae")
+    for name, df in zip(["./data_db/X_train.csv", "./data_db/X_test.csv", "./data_db/y_train.csv", "./data_db/y_test.csv", "./data_db/y_predict.csv"], [new_dataset.X_train, new_dataset.X_test, new_dataset.y_train, new_dataset.y_test, pd.DataFrame(predictions)]):
+        pd.DataFrame(df).to_csv(name)
