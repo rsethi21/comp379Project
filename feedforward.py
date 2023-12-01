@@ -56,9 +56,12 @@ class Dataset:
         return X_batches, y_batches
 
 class FFM(tf.keras.Model):
-    def __init__(self, hidden_layers=[18, 15, 12, 9], output_size=1):
+    def __init__(self, hidden_layers=[18, 15, 12, 9], output_size=1, num_epochs=50, batches=50, lr=0.0001):
         super(FFM, self).__init__()
         self.encoder_portion = self.encoder(hidden_layers, output_size)
+        self.num_epochs = num_epochs
+        self.batches = batches
+        self.lr = lr
 
     def encoder(self, hidden_layers, output_size, hidden_activation="relu", output_activation="sigmoid"):
         model = tf.keras.Sequential()
@@ -87,11 +90,11 @@ class FFM(tf.keras.Model):
         optimizer.apply_gradients(zip(gradients, self.trainable_variables))
         return loss
 
-    def fit(self, new_dataset, num_epochs=50, batches=50, lr=0.0001):
+    def fit(self, new_dataset):
         loss = 0
-        optim = tf.keras.optimizers.Adam(lr)
-        for epoch in tqdm(range(num_epochs), desc="Epoch"):
-            xs, ys = new_dataset.prepare_batches(batches)
+        optim = tf.keras.optimizers.Adam(self.lr)
+        for epoch in tqdm(range(self.num_epochs), desc="Epoch"):
+            xs, ys = new_dataset.prepare_batches(self.batches)
             for batch_x, batch_y in zip(xs, ys): # apply np.random_choice and its non-uniform probabilities
                 loss = self.train(batch_x, batch_y, optim)
         # print(f"Final loss: {loss}")
@@ -133,16 +136,13 @@ if __name__ == "__main__":
     # set hyperparameters
     threshold = 0.5
 
-    hyperparameters = {"hidden_layers": [[18, 15, 12, 9], [18, 15, 12], [18, 15], [15, 12, 9], [12, 9]], "output_size":[args.output]}
-
-    # hyperparameter search model
-    # bh, bscore = grid_search_multi(eval, new_dataset, 2, **hyperparameters)
-    # print(f"Best Score: {bscore}")
-    # print(f"Best hyperparameters: {bh}")
-    # print()
+    hyperparameters = {"hidden_layers": [[45, 36, 27, 18]], "output_size": [args.output], "num_epochs": [50], "batches": [50], "lr": [0.0001]}
+    bh, bscore = grid_search_multi(eval, new_dataset, 2, **hyperparameters)
+    print(f"Best Score: {bscore}")
+    print(f"Best hyperparameters: {bh}")
+    print()
 
     # create model
-    bh = hyperparameters = {"hidden_layers": [45, 36, 27, 18], "output_size":args.output}
     model = FFM(**bh)
     model.fit(new_dataset)
     
