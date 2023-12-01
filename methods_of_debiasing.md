@@ -10,6 +10,8 @@
     - Status: try on all models
 - Create new data samples of less represented spaces
     - Status: not attempted but could use VAE or GAN to generate new training examples
+- Adding Counterfactual Data
+    - Status: not attempted but could do it for one variable and see the result
 - Uncertainty output to inform user
     - try on all models
 - Fairness contraints

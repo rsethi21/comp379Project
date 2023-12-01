@@ -80,13 +80,17 @@ class Dataset:
 
 
 class DebiasedModel(tf.keras.Model):
-    def __init__(self, latent_dim=6, hidden_layers=[18, 15, 12, 9], input_size=21, db_weight=0.00005):
+    def __init__(self, latent_dim=6, hidden_layers=[18, 15, 12, 9], input_size=21, db_weight0=0.0005, db_weight1=0.0005, num_epochs=50, batches=50, lr=0.0001):
         super(DebiasedModel, self).__init__()
         self.latent_dim = latent_dim
-        self.encoder_output = 2*self.latent_dim + 1
+        self.encoder_output = 4*self.latent_dim + 1
         self.encoder_portion = self.encoder(hidden_layers)
         self.decoder_portion = self.decoder(hidden_layers, input_size)
-        self.db_weight = db_weight
+        self.db_weight0 = db_weight0
+        self.db_weight1 = db_weight1
+        self.num_epochs = num_epochs
+        self.batches = batches
+        self.lr = lr
         
     def decoder(self, hidden_layers, input_size, hidden_activation="relu"):
         model = tf.keras.Sequential()
@@ -105,21 +109,25 @@ class DebiasedModel(tf.keras.Model):
     def encode(self, x):
         encoded_output = self.encoder_portion(x)
         yhat = tf.expand_dims(encoded_output[:,0],-1)
-        means = encoded_output[:,1:self.latent_dim+1]
-        sigmas = encoded_output[:,self.latent_dim+1:]
-        return yhat, means, sigmas
+        mean0 = encoded_output[:,1:self.latent_dim+1]
+        mean1 = encoded_output[:,self.latent_dim+1:2*self.latent_dim+1]
+        sigma0 = encoded_output[:,2*self.latent_dim+1:3*self.latent_dim+1]
+        sigma1 = encoded_output[:,3*self.latent_dim+1:]
+        return yhat, mean0, mean1, sigma0, sigma1
 
     def decode(self, latent_vector, input_size):
         return self.decoder_portion(latent_vector, input_size)
     
     def run(self, x):
-        yhat, means, sigmas = self.encode(x)
-        latent_vector = self.extract_latent_vector(means, sigmas)
-        xhat = self.decode(latent_vector, len(x[0]))
-        return yhat, means, sigmas, xhat
+        yhat, mean0, mean1, sigma0, sigma1 = self.encode(x)
+        latent_vector0 = self.extract_latent_vector(mean0, sigma0)
+        latent_vector1 = self.extract_latent_vector(mean1, sigma1)
+        xhat0 = self.decode(latent_vector0, len(x[0]))
+        xhat1 = self.decode(latent_vector1, len(x[0]))
+        return yhat, mean0, mean1, sigma0, sigma1, xhat0, xhat1
     
     def predict(self, x):
-        yhat, means, sigmas = self.encode(x)
+        yhat, mean0, mean1, sigma0, sigma1 = self.encode(x)
         return tf.squeeze(tf.sigmoid(yhat))
 
     def extract_latent_vector(self, means, sigmas):
@@ -131,20 +139,31 @@ class DebiasedModel(tf.keras.Model):
         return mean + tf.math.exp(0.5 * sigma) * epsilon
 
     @classmethod
-    def custom_loss(cls, x, xhat, y, yhat, mu, sigma, debias_weight):
-        latent_normalization_loss = 0.5 * tf.reduce_sum(tf.exp(sigma) + tf.square(mu) - 1.0 - sigma, axis=1)
-        reconstruction_loss = tf.reduce_mean(tf.abs(x-xhat), axis=1)
+    def custom_loss(cls, x, xhat0, xhat1, y, yhat, mu0, mu1, sigma0, sigma1, debias_weight0, debias_weight1):
+        latent_normalization_loss0 = 0.5 * tf.reduce_sum(tf.exp(sigma0) + tf.square(mu0) - 1.0 - sigma0, axis=1)
+        reconstruction_loss0 = tf.reduce_mean(tf.abs(x-xhat0), axis=1)
+
+        latent_normalization_loss1 = 0.5 * tf.reduce_sum(tf.exp(sigma1) + tf.square(mu1) - 1.0 - sigma1, axis=1)
+        reconstruction_loss1 = tf.reduce_mean(tf.abs(x-xhat1), axis=1)
+
         classification_loss = tf.nn.sigmoid_cross_entropy_with_logits(y.reshape(-1, 1), yhat)
-        vae_loss = reconstruction_loss + debias_weight * latent_normalization_loss
-        total_loss = tf.reduce_mean(classification_loss + vae_loss)
+        
+        vae_loss0 = reconstruction_loss0 + debias_weight0 * latent_normalization_loss0
+        vae_loss1 = reconstruction_loss1 + debias_weight1 * latent_normalization_loss1
+        indicator = tf.cast(tf.equal(y, 1), tf.float32)
+
+        total_loss = tf.reduce_mean(classification_loss + (1-indicator)*vae_loss0 + indicator*vae_loss1)
         return total_loss, classification_loss
 
-    def extract_distributions(self, data, num_batches):
+    def extract_distributions(self, data, num_batches, pos=False):
         mu = np.zeros((len(data), self.latent_dim))
         for start_i in range(0, len(data), len(data)//num_batches):
             end_i = min(start_i+len(data)//num_batches, len(data)+1)
-            _, batch_mu, _ = self.encode(data[start_i:end_i])
-            mu[start_i:end_i] = batch_mu
+            _, mean0, mean1, _, _ = self.encode(data[start_i:end_i])
+            if pos:
+                mu[start_i:end_i] = mean1
+            else:
+                mu[start_i:end_i] = mean0
 
         training_sample_p = np.zeros(mu.shape[0])
         for i2 in range(self.latent_dim):
@@ -166,35 +185,24 @@ class DebiasedModel(tf.keras.Model):
 
         return training_sample_p
 
-    def stratified_train(self, x, y, optimizer, weight):
+    def stratified_train(self, x, y, optimizer, weight0, weight1):
         with tf.GradientTape() as tape:
-            yhat_p, mean_p, sigma_p, xhat_p = self.run(x[np.where(y == 1)[0]])
-            yhat_n, mean_n, sigma_n, xhat_n = self.run(x[np.where(y == 0)[0]])
-            loss_p, class_loss_p = DebiasedModel.custom_loss(x[np.where(y == 1)[0]], xhat_p, y[np.where(y==1)[0]].astype('float32'), yhat_p, mean_p, sigma_p, weight)
-            loss_n, class_loss_n = DebiasedModel.custom_loss(x[np.where(y == 0)[0]], xhat_n, y[np.where(y==0)[0]].astype('float32'), yhat_n, mean_n, sigma_n, weight)
-            loss = tf.reduce_mean(loss_p + loss_n)
+            yhat, mean_p, mean_n, sigma_p, sigma_n, xhat_p, xhat_n = self.run(x)
+            loss, class_loss_p = DebiasedModel.custom_loss(x, xhat_p, xhat_n, y.astype('float32'), yhat, mean_p, mean_n, sigma_p, sigma_n, weight0, weight1)
         gradients = tape.gradient(loss, self.trainable_variables)
         optimizer.apply_gradients(zip(gradients, self.trainable_variables))
         return loss
 
-    def train(self, x, y, optimizer, weight):
-        with tf.GradientTape() as tape:
-            yhat, mean, sigma, xhat = self.run(x)
-            loss, class_loss = DebiasedModel.custom_loss(x, xhat, y.astype('float32'), yhat, mean, sigma, weight)
-        gradients = tape.gradient(loss, self.trainable_variables)
-        optimizer.apply_gradients(zip(gradients, self.trainable_variables))
-        return loss
-    
-    def fit(self, new_dataset, num_epochs=50, batches=50, lr=0.0001):
+    def fit(self, new_dataset):
         loss = 0
-        optim = tf.keras.optimizers.Adam(lr)
-        for epoch in tqdm(range(num_epochs), desc="Epoch"):
-            pos_probs = self.extract_distributions(new_dataset.get_positive_indices(return_data=True), batches)
-            neg_probs = self.extract_distributions(new_dataset.get_negative_indices(return_data=True), batches)
-            xs, ys = new_dataset.prepare_batches(batches, pos_probability=pos_probs, neg_probability=neg_probs)
+        optim = tf.keras.optimizers.Adam(self.lr)
+        for epoch in tqdm(range(self.num_epochs), desc="Epoch"):
+            pos_probs = self.extract_distributions(new_dataset.get_positive_indices(return_data=True), self.batches, pos=True)
+            neg_probs = self.extract_distributions(new_dataset.get_negative_indices(return_data=True), self.batches, pos=False)
+            xs, ys = new_dataset.prepare_batches(self.batches, pos_probability=pos_probs, neg_probability=neg_probs)
             for batch_x, batch_y in zip(xs, ys): # apply np.random_choice and its non-uniform probabilities
-                loss = self.stratified_train(batch_x, batch_y, optim, self.db_weight)
-        # print(f"Final loss: {loss}")
+                loss = self.stratified_train(batch_x, batch_y, optim, self.db_weight0, self.db_weight1)
+        print(f"Final loss: {loss}")
 
 def eval(data, hyperparameters):
     model = DebiasedModel(**hyperparameters)
@@ -205,8 +213,9 @@ def eval(data, hyperparameters):
     f1s = []
     for a in [11, 17, 18, 19, 20]:
         positive, negative = stratified_f1(data.X_val, data.y_val, predictions, a)
-        f1s.append(positive.values())
-        f1s.append(negative.values())
+        combined = list(positive.values())
+        combined.extend(list(negative.values()))
+        f1s.append(np.mean(np.array(combined)))
     return np.mean(np.array(f1s))
     
 
@@ -232,9 +241,8 @@ if __name__ == "__main__":
     # create dataset
     new_dataset = Dataset(args.input, args.predictor, args.scale, val_split=0.5)
     
-    # set hyperparameters
     threshold = 0.5
-    hyperparameters = {"latent_dim": [2, 4, 6, 8], "hidden_layers": [[18, 15, 12, 9]], "input_size":[21], "db_weight":[0.01, 0.001, 0.0001, 0.00001, 0.000001]}
+    hyperparameters = {"latent_dim": [2, 4, 6, 8], "hidden_layers": [[45, 36, 27, 18]], "input_size": [21], "db_weight0":[0.1, 0.001, 0.0001, 0.00001], "db_weight1":[0.1, 0.001, 0.0001, 0.00001], "batches":[50], "num_epochs": [50], "lr":[0.0001]}
 
 
     # simple hyperparameter search
