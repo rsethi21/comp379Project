@@ -42,7 +42,7 @@ class Dataset:
         X = data.drop(columns=[predictor]).to_numpy()
         self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, random_state=self.rs, test_size=split, stratify=y)
         if val_split != None:
-            self.X_test, self.X_val, self.y_test, self.y_val = train_test_split(self.X_test, self.y_test, random_state=self.rs, test_size=val_split, stratify=self.y_test)
+            self.X_train, self.X_val, self.y_train, self.y_val = train_test_split(self.X_train, self.y_train, random_state=self.rs, test_size=val_split, stratify=self.y_train)
         else:
             self.X_val = None
             self.y_val = None
@@ -239,7 +239,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # create dataset
-    new_dataset = Dataset(args.input, args.predictor, args.scale, val_split=0.5)
+    new_dataset = Dataset(args.input, args.predictor, args.scale, val_split=0.1)
     
     threshold = 0.5
     hyperparameters = {"latent_dim": [2, 4, 6, 8], "hidden_layers": [[45, 36, 27, 18]], "input_size": [21], "db_weight0":[0.1, 0.001, 0.0001, 0.00001], "db_weight1":[0.1, 0.001, 0.0001, 0.00001], "batches":[50], "num_epochs": [50], "lr":[0.0001]}
@@ -252,16 +252,17 @@ if __name__ == "__main__":
     print()
 
     # create model
+    full_dataset = Dataset(args.input, args.predictor, args.scale)
     model = DebiasedModel(**bh)
-    model.fit(new_dataset)
+    model.fit(full_dataset)
     # current approach takes the normalized overall latent space and extracts distribution of latent space for each indicator from that overall distribution
     # possible extension is to map the latent space distribution for each one normally and then pick probabilities
     
     # Evaluate model
-    predictions = model.predict(new_dataset.X_test)
+    predictions = model.predict(full_dataset.X_test)
     predictions = np.array([0 if p < threshold else 1 for p in predictions])
-    print(accuracy_score(new_dataset.y_test, predictions))
-    print(f1_score(new_dataset.y_test, predictions))
-    print(stratified_f1(new_dataset.X_test, new_dataset.y_test, predictions, 20))
-    for name, df in zip(["./data_db/X_train.csv", "./data_db/X_test.csv", "./data_db/y_train.csv", "./data_db/y_test.csv", "./data_db/y_predict.csv"], [new_dataset.X_train, new_dataset.X_test, new_dataset.y_train, new_dataset.y_test, pd.DataFrame(predictions)]):
+    print(accuracy_score(full_dataset.y_test, predictions))
+    print(f1_score(full_dataset.y_test, predictions))
+    print(stratified_f1(full_dataset.X_test, full_dataset.y_test, predictions, 20))
+    for name, df in zip(["./data_db/X_train.csv", "./data_db/X_test.csv", "./data_db/y_train.csv", "./data_db/y_test.csv", "./data_db/y_predict.csv"], [full_dataset.X_train, full_dataset.X_test, full_dataset.y_train, full_dataset.y_test, pd.DataFrame(predictions)]):
         pd.DataFrame(df).to_csv(name)
