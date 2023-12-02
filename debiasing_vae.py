@@ -1,4 +1,4 @@
-# This model file is adapted from: © MIT 6.S191: Introduction to Deep Learning http://introtodeeplearning.com
+# This model file is adapted and modified from: © MIT 6.S191: Introduction to Deep Learning http://introtodeeplearning.com
 
 import argparse
 from tqdm import tqdm
@@ -255,8 +255,6 @@ if __name__ == "__main__":
     full_dataset = Dataset(args.input, args.predictor, args.scale)
     model = DebiasedModel(**bh)
     model.fit(full_dataset)
-    # current approach takes the normalized overall latent space and extracts distribution of latent space for each indicator from that overall distribution
-    # possible extension is to map the latent space distribution for each one normally and then pick probabilities
     
     # Evaluate model
     predictions = model.predict(full_dataset.X_test)
