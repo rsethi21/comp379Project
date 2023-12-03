@@ -107,9 +107,10 @@ def eval(data, hyperparameters):
     
     f1s = []
     for a in [11, 17, 18, 19, 20]:
-        positive, negative = stratified_f1(data.y_val, predictions, a)
-        f1s.append(positive.values())
-        f1s.append(negative.values())
+        positive, negative = stratified_f1(data.X_val, data.y_val, predictions, a)
+        combined = list(positive.values())
+        combined.extend(list(negative.values()))
+        f1s.append(np.mean(np.array(combined)))
     return np.mean(np.array(f1s))
 
 def stratified_f1(x, truth, predictions, index):
@@ -136,11 +137,13 @@ if __name__ == "__main__":
     # set hyperparameters
     threshold = 0.5
 
-    hyperparameters = {"hidden_layers": [[45, 36, 27, 18]], "output_size": [args.output], "num_epochs": [50], "batches": [50], "lr": [0.0001]}
-    bh, bscore = grid_search_multi(eval, new_dataset, 2, **hyperparameters)
-    print(f"Best Score: {bscore}")
-    print(f"Best hyperparameters: {bh}")
-    print()
+    # hyperparameters = {"hidden_layers": [[45, 36, 27, 18]], "output_size": [args.output], "num_epochs": [50], "batches": [50], "lr": [0.0001]}
+    # bh, bscore = grid_search_multi(eval, new_dataset, 2, **hyperparameters)
+    # print(f"Best Score: {bscore}")
+    # print(f"Best hyperparameters: {bh}")
+    # print()
+
+    bh = {"hidden_layers": [45, 36, 27, 18], "output_size": args.output, "num_epochs": 50, "batches": 50, "lr": 0.0001}
 
     # create model
     full_dataset = Dataset(args.input, args.predictor, args.scale)
@@ -155,3 +158,4 @@ if __name__ == "__main__":
     print(stratified_f1(full_dataset.X_test, full_dataset.y_test, predictions, 20))
     for name, df in zip(["./data_ff/X_train.csv", "./data_ff/X_test.csv", "./data_ff/y_train.csv", "./data_ff/y_test.csv", "./data_ff/y_predict.csv"], [full_dataset.X_train, full_dataset.X_test, full_dataset.y_train, full_dataset.y_test, pd.DataFrame(predictions)]):
         pd.DataFrame(df).to_csv(name)
+

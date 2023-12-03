@@ -242,7 +242,7 @@ if __name__ == "__main__":
     new_dataset = Dataset(args.input, args.predictor, args.scale, val_split=0.1)
     
     threshold = 0.5
-    hyperparameters = {"latent_dim": [2, 4, 6, 8], "hidden_layers": [[45, 36, 27, 18]], "input_size": [21], "db_weight0":[0.1, 0.001, 0.0001, 0.00001], "db_weight1":[0.1, 0.001, 0.0001, 0.00001], "batches":[50], "num_epochs": [50], "lr":[0.0001]}
+    hyperparameters = {"latent_dim": [2, 4, 6], "hidden_layers": [[45, 36, 27, 18]], "input_size": [21], "db_weight0":[0.1, 0.001, 0.0001, 0.00001], "db_weight1":[0.1, 0.001, 0.0001, 0.00001], "batches":[50], "num_epochs": [50], "lr":[0.0001]}
 
 
     # simple hyperparameter search
