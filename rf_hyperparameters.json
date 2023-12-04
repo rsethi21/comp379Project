@@ -1,0 +1,4 @@
+{
+"n_estimators":[10, 100, 1000],
+"criterion": ["gini", "log_loss", "entropy"]
+}
