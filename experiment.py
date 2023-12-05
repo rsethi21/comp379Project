@@ -47,9 +47,10 @@ if __name__ == "__main__":
     print(f"Best model params: {best_model.best_params_}")
     retrained_best_model = SVC(random_state=random_state, **best_model.best_params_)
     retrained_best_model.fit(X_train, y_train)
-
-    cm = confusion_matrix(y_test.to_numpy().flatten(), retrained_best_model(X_test))
-    score = accuracy_score(y_test.to_numpy().flatten(), retrained_best_model(X_test))
+    
+    predictions = retrained_best_model.predict(X_test)
+    cm = confusion_matrix(y_test.to_numpy().flatten(), predictions)
+    score = accuracy_score(y_test.to_numpy().flatten(), predictions)
     print(score)
 
     with open(os.path.join(args.output, "best_svm_model.pkl"), "wb") as model_file:
