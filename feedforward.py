@@ -135,7 +135,7 @@ def eval(data, hyperparameters):
     model = FFM(**hyperparameters)
     model.fit(data)
     predictions = model.predict(data.X_val)
-    predictions = np.array([0 if p < 0.5 else 1 for p in predictions])
+    predictions = np.array([0 if p < 0.5 else 1 for p in predictions]) # change this is make more output nodesl; take max prob
     
     f1s = []
     for a in [11, 17, 18, 19, 20]:
@@ -186,7 +186,7 @@ if __name__ == "__main__":
     
     # Evaluate model
     predictions = model.predict(new_dataset.X_test)
-    predictions = np.array([0 if p < threshold else 1 for p in predictions])
+    predictions = np.array([0 if p < threshold else 1 for p in predictions]) # change this if more output nodes (take max prob)
     print(accuracy_score(new_dataset.y_test, predictions))
     print(f1_score(new_dataset.y_test, predictions))
     print(stratified_f1(new_dataset.X_test, new_dataset.y_test, predictions, 20))
