@@ -3,9 +3,8 @@
 - https://superwise.ai/blog/dealing-with-machine-learning-bias/
 - https://ocw.mit.edu/courses/res-ec-001-exploring-fairness-in-machine-learning-for-international-development-spring-2020/pages/module-four-case-studies/case-study-mitigating-gender-bias/
 ## Compare different model architectures:
-- If possible I would like someone to try random forest (I am curious to see how an ensemble model may perform compared to a single one)
 - Status: Tried on all models
-- All seem very similar in terms of performance
+- All seem very similar in terms of performance, seems ensemble performs much better
 ## Debiasing using Data-based Methods:
 - Resampling multiple variables
     - Method: VAEs to balance the distribution of overall latent space of the input
