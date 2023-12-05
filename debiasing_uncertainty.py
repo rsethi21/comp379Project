@@ -1,38 +1,30 @@
 import argparse
 from tqdm import tqdm
-import json
 
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
 import tensorflow as tf
-from sklearn.model_selection import train_test_split, KFold
+from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, f1_score, accuracy_score
 from sklearn.utils import shuffle
 import pdb
 from gridsearch import grid_search_multi
 
-# print(tf.config.list_physical_devices("GPU"))
-
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-i", "--input", help="input path to diabetes file", required=True)
 parser.add_argument("-p", "--predictor", help="name of prediction column", required=True)
 parser.add_argument("-s", "--scale", help="columns to scale", nargs="*", required=False, default=[])
-parser.add_argument("-o", "--output", help="number of output nodes", required=False, type=int, default=1)
-parser.add_argument("-v", "--hyperparameters", help="path to json file with hyperparameters to search against", required=False, default=None)
-parser.add_argument("-k", "--kfolds", help="number of folds for cross validation", required=False, type=int, default=5)
-parser.add_argument("-m", "--multiprocess", help="number of processors to use for selection", required=False, type=int, default=1)
-parser.add_argument("-c", "--percent", help="percent split of test and train", required=False, type=float, default=0.2)
 
 class Dataset:
     def __init__(self, filepath, predictor, scale_columns, split=0.2, val_split=None, rs = 4):
         self.rs = rs
         self.open_dataset(filepath)
         self.scale_data(scale_columns)
-        self.separate_samples(self.data, predictor, split)
+        self.separate_samples(self.data, predictor, split, val_split)
 
     def open_dataset(self, filepath):
         self.data = pd.read_csv(filepath, header = 0)
@@ -49,24 +41,46 @@ class Dataset:
         else:
             self.X_val = None
             self.y_val = None
-    
 
     def scale_data(self, columns):
         scaler = MinMaxScaler()
         self.data.loc[:,columns] = scaler.fit_transform(self.data.loc[:,columns])
         self.scaler = scaler
 
-    def prepare_batches(self, batch_size):
-        X_batches, y_batches = np.array_split(self.X_train, batch_size), np.array_split(self.y_train, batch_size)
+    def get_positive_indices(self, return_data=False):
+        self.pos_indices = np.where(self.y_train == 1.0)[0]
+        if return_data:
+            return self.X_train[self.pos_indices]
+
+    def get_negative_indices(self, return_data=False):
+        self.neg_indices = np.where(self.y_train == 0.0)[0]
+        if return_data:
+            return self.X_train[self.neg_indices]
+
+    def prepare_batches(self, batch_size, pos_probability = None, neg_probability = None):
+        if len(self.X_train) % batch_size != 0:
+            assert(f"Training set of length {len(self.X_train)} is not divisible by {batch_size}. Choose a different batch size if you would like to incoporate all data samples in training.")
+        X_batches = []
+        y_batches = []
+        pi = self.pos_indices
+        ni = self.neg_indices
+        num_samples = len(self.X_train) // batch_size
+        for _ in range(batch_size):
+            selected__pos_indices = np.random.choice(pi, size=num_samples//2, replace=False, p=pos_probability)
+            selected_neg_indices = np.random.choice(ni, size=num_samples//2, replace=False, p=neg_probability)
+            selected_indices = np.sort(np.concatenate((selected__pos_indices, selected_neg_indices)))
+            X_batches.append(self.X_train[selected_indices])
+            y_batches.append(self.y_train[selected_indices])
         return X_batches, y_batches
 
-class FFM(tf.keras.Model):
-    def __init__(self, hidden_layers=[18, 15, 12, 9], output_size=1, num_epochs=50, batches=50, lr=0.0001):
-        super(FFM, self).__init__()
-        self.encoder_portion = self.encoder(hidden_layers, output_size)
+class CounterfactuallyDebiasedModel(tf.keras.Model):
+    def __init__(self, hidden_layers=[45, 36, 27, 18], output_size=1, num_epochs=50, batches=50, lr=0.0001):
+        super(CounterfactuallyDebiasedModel, self).__init__()
+        self.hl = hidden_layers
         self.num_epochs = num_epochs
         self.batches = batches
         self.lr = lr
+        self.encoder_portion = self.encoder(hidden_layers, output_size)
 
     def encoder(self, hidden_layers, output_size, hidden_activation="relu", output_activation="sigmoid"):
         model = tf.keras.Sequential()
@@ -90,7 +104,7 @@ class FFM(tf.keras.Model):
     def train(self, x, y, optimizer):
         with tf.GradientTape() as tape:
             yhat = self.encode(x)
-            loss = FFM.custom_loss(y.astype('float32'), yhat)
+            loss = CounterfactuallyDebiasedModel.custom_loss(y.astype('float32'), yhat)
         gradients = tape.gradient(loss, self.trainable_variables)
         optimizer.apply_gradients(zip(gradients, self.trainable_variables))
         return loss
@@ -104,32 +118,8 @@ class FFM(tf.keras.Model):
                 loss = self.train(batch_x, batch_y, optim)
         # print(f"Final loss: {loss}")
 
-
-def search(new_dataset, cv, hyperparameters, numprocessors):
-    scores = []
-    hp = []
-    original_X_train = np.copy(new_dataset.X_train)
-    original_y_train = np.copy(new_dataset.y_train)
-    splits = KFold(n_splits=cv, shuffle=False)
-    for i, (train_index, test_index) in enumerate(splits.split(original_X_train)):
-        print(f"Fold: {i+1}...")
-        new_dataset.X_train = original_X_train[train_index]
-        new_dataset.y_train = original_y_train[train_index]
-        new_dataset.X_val = original_X_train[test_index]
-        new_dataset.y_val = original_y_train[test_index]
-        _, _, scorings, hs = grid_search_multi(eval, new_dataset, numprocessors, return_all=True, **hyperparameters)
-        scores.append(list(scorings))
-        hp = hs
-    new_dataset.X_train = original_X_train
-    new_dataset.y_train = original_y_train
-    new_dataset.X_val = None
-    new_dataset.y_val = None
-    best_score = np.mean(np.array(scores), axis=0)
-    i = np.argmax(best_score)
-    return best_score[i], hp[i]
-
 def eval(data, hyperparameters):
-    model = FFM(**hyperparameters)
+    model = CounterfactuallyDebiasedModel(**hyperparameters)
     model.fit(data)
     predictions = model.predict(data.X_val)
     predictions = np.array([0 if p < 0.5 else 1 for p in predictions])
@@ -141,6 +131,7 @@ def eval(data, hyperparameters):
         combined.extend(list(negative.values()))
         f1s.append(np.mean(np.array(combined)))
     return np.mean(np.array(f1s))
+    
 
 def stratified_f1(x, truth, predictions, index):
 
@@ -162,28 +153,26 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # create dataset
-    new_dataset = Dataset(args.input, args.predictor, args.scale, args.percent)    
+    new_dataset = Dataset(args.input, args.predictor, args.scale, val_split=0.1)    
     # set hyperparameters
     threshold = 0.5
-    with open(args.hyperparameters, "r") as json_file:
-        hyperparameters = json.load(json_file)
 
-    # bscore, bh = search(new_dataset, args.kfolds, hyperparameters, args.multiprocess, args.percent)
-    # print(f"Best Score: {bscore}")
-    # print(f"Best hyperparameters: {bh}")
-    # print()
-
-    bh = {"hidden_layers": [45, 36, 27, 18], "output_size": args.output, "num_epochs": 50, "batches": 50, "lr": 0.0001}
+    hyperparameters = {"hidden_layers": [[45, 36, 27, 18]], "output_size": [args.output], "num_epochs": [50], "batches": [50], "lr": [0.0001]}
+    bh, bscore = grid_search_multi(eval, new_dataset, 2, **hyperparameters)
+    print(f"Best Score: {bscore}")
+    print(f"Best hyperparameters: {bh}")
+    print()
 
     # create model
-    model = FFM(**bh)
-    model.fit(new_dataset)
+    full_dataset = Dataset(args.input, args.predictor, args.scale)
+    model = CounterfactuallyDebiasedModel(**bh)
+    model.fit(full_dataset)
     
     # Evaluate model
-    predictions = model.predict(new_dataset.X_test)
+    predictions = model.predict(full_dataset.X_test)
     predictions = np.array([0 if p < threshold else 1 for p in predictions])
-    print(accuracy_score(new_dataset.y_test, predictions))
-    print(f1_score(new_dataset.y_test, predictions))
-    print(stratified_f1(new_dataset.X_test, new_dataset.y_test, predictions, 20))
-    for name, df in zip(["./data_ff/X_train.csv", "./data_ff/X_test.csv", "./data_ff/y_train.csv", "./data_ff/y_test.csv", "./data_ff/y_predict.csv"], [new_dataset.X_train, new_dataset.X_test, new_dataset.y_train, new_dataset.y_test, pd.DataFrame(predictions)]):
+    print(accuracy_score(full_dataset.y_test, predictions))
+    print(f1_score(full_dataset.y_test, predictions))
+    print(stratified_f1(full_dataset.X_test, full_dataset.y_test, predictions, 20))
+    for name, df in zip(["./data_ca/X_train.csv", "./data_ca/X_test.csv", "./data_ca/y_train.csv", "./data_ca/y_test.csv", "./data_ca/y_predict.csv"], [full_dataset.X_train, full_dataset.X_test, full_dataset.y_train, full_dataset.y_test, pd.DataFrame(predictions)]):
         pd.DataFrame(df).to_csv(name)
