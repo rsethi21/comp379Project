@@ -23,4 +23,4 @@
     - Status: try on all models
 - Fairness contraints
     - Method: create own custom loss function that forces a balancing of performance for certain attributes
-    - Status: try on all models
+    - Status: try on all models; applied to neural networks in hyperparameter selection in combination with the resampling method whcih seems to improve performance across the income categories in terms of balancing
