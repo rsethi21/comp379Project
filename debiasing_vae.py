@@ -15,7 +15,7 @@ from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, f1_score, 
 from sklearn.utils import shuffle
 import pdb
 from gridsearch import grid_search_multi
-
+import os
 
 # print(tf.config.list_physical_devices("GPU"))
 
@@ -28,12 +28,14 @@ parser.add_argument("-v", "--hyperparameters", help="path to json file with hype
 parser.add_argument("-k", "--kfolds", help="number of folds for cross validation", required=False, type=int, default=5)
 parser.add_argument("-m", "--multiprocess", help="number of processors to use for selection", required=False, type=int, default=1)
 parser.add_argument("-c", "--percent", help="percent split of test and train", required=False, type=float, default=0.2)
+parser.add_argument("-d", "--directory", help="path to folder to save model session output", required=False, default=".")
 
 class Dataset:
     def __init__(self, filepath, predictor, scale_columns, split, val_split=None, rs = 4):
         self.rs = rs
         self.open_dataset(filepath)
-        self.scale_data(scale_columns)
+        if len(scale_columns) != 0:
+            self.scale_data(scale_columns)
         self.separate_samples(self.data, predictor, split, val_split)
 
     def open_dataset(self, filepath):
@@ -269,8 +271,9 @@ if __name__ == "__main__":
     new_dataset = Dataset(args.input, args.predictor, args.scale, args.percent)
     
     threshold = 0.5
-    with open(args.hyperparameters, "r") as json_file:
-        hyperparameters = json.load(json_file)
+    if args.hyperparameters != None:
+        with open(args.hyperparameters, "r") as json_file:
+            hyperparameters = json.load(json_file)
 
     # simple hyperparameter search
     bscore, bh = search(new_dataset, args.kfolds, hyperparameters, args.multiprocess)
@@ -288,5 +291,5 @@ if __name__ == "__main__":
     print(accuracy_score(new_dataset.y_test, predictions))
     print(f1_score(new_dataset.y_test, predictions))
     print(stratified_f1(new_dataset.X_test, new_dataset.y_test, predictions, 20))
-    for name, df in zip(["./data_db/X_train.csv", "./data_db/X_test.csv", "./data_db/y_train.csv", "./data_db/y_test.csv", "./data_db/y_predict.csv"], [new_dataset.X_train, new_dataset.X_test, new_dataset.y_train, new_dataset.y_test, pd.DataFrame(predictions)]):
+    for name, df in zip([os.path.join(args.directory, "X_train.csv"), os.path.join(args.directory, "X_test.csv"), os.path.join(args.directory, "y_train.csv"), os.path.join(args.directory, "y_test.csv"), os.path.join(args.directory, "y_predict.csv")], [new_dataset.X_train, new_dataset.X_test, new_dataset.y_train, new_dataset.y_test, pd.DataFrame(predictions)]):
         pd.DataFrame(df).to_csv(name)
