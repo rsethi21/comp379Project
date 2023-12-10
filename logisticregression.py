@@ -9,7 +9,7 @@ from sklearn.metrics import confusion_matrix
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-df = pd.read_csv("diabetes_data.csv")
+df = pd.read_csv("diabetes.csv")
 
 #specify the columns to scale
 columns_to_scale = ['BMI', 'Age', 'Education', 'GenHlth', 'MentHlth', 'PhysHlth']
