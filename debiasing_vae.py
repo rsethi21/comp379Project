@@ -2,19 +2,20 @@
 
 import argparse
 from tqdm import tqdm
+import json
 
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
 import tensorflow as tf
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, KFold
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, f1_score, accuracy_score
 from sklearn.utils import shuffle
 import pdb
 from gridsearch import grid_search_multi
-
+import os
 
 # print(tf.config.list_physical_devices("GPU"))
 
@@ -23,12 +24,18 @@ parser = argparse.ArgumentParser()
 parser.add_argument("-i", "--input", help="input path to diabetes file", required=True)
 parser.add_argument("-p", "--predictor", help="name of prediction column", required=True)
 parser.add_argument("-s", "--scale", help="columns to scale", nargs="*", required=False, default=[])
+parser.add_argument("-v", "--hyperparameters", help="path to json file with hyperparameters to search against", required=False, default=None)
+parser.add_argument("-k", "--kfolds", help="number of folds for cross validation", required=False, type=int, default=5)
+parser.add_argument("-m", "--multiprocess", help="number of processors to use for selection", required=False, type=int, default=1)
+parser.add_argument("-c", "--percent", help="percent split of test and train", required=False, type=float, default=0.2)
+parser.add_argument("-d", "--directory", help="path to folder to save model session output", required=False, default=".")
 
 class Dataset:
-    def __init__(self, filepath, predictor, scale_columns, split=0.2, val_split=None, rs = 4):
+    def __init__(self, filepath, predictor, scale_columns, split, val_split=None, rs = 4):
         self.rs = rs
         self.open_dataset(filepath)
-        self.scale_data(scale_columns)
+        if len(scale_columns) != 0:
+            self.scale_data(scale_columns)
         self.separate_samples(self.data, predictor, split, val_split)
 
     def open_dataset(self, filepath):
@@ -38,9 +45,9 @@ class Dataset:
         self.columns = data.columns
         data = data.dropna()
         data = data.sample(frac=1, random_state=self.rs)
-        y = data.loc[:,predictor].to_numpy()
-        X = data.drop(columns=[predictor]).to_numpy()
-        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, y, random_state=self.rs, test_size=split, stratify=y)
+        self.y = data.loc[:,predictor].to_numpy()
+        self.X = data.drop(columns=[predictor]).to_numpy()
+        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(self.X, self.y, random_state=self.rs, test_size=split, stratify=self.y)
         if val_split != None:
             self.X_train, self.X_val, self.y_train, self.y_val = train_test_split(self.X_train, self.y_train, random_state=self.rs, test_size=val_split, stratify=self.y_train)
         else:
@@ -203,12 +210,35 @@ class DebiasedModel(tf.keras.Model):
             for batch_x, batch_y in zip(xs, ys): # apply np.random_choice and its non-uniform probabilities
                 loss = self.stratified_train(batch_x, batch_y, optim, self.db_weight0, self.db_weight1)
         print(f"Final loss: {loss}")
+    
+def search(new_dataset, cv, hyperparameters, numprocessors):
+    scores = []
+    hp = []
+    original_X_train = np.copy(new_dataset.X_train)
+    original_y_train = np.copy(new_dataset.y_train)
+    splits = KFold(n_splits=cv, shuffle=False)
+    for i, (train_index, test_index) in enumerate(splits.split(original_X_train)):
+        print(f"Fold: {i+1}...")
+        new_dataset.X_train = original_X_train[train_index]
+        new_dataset.y_train = original_y_train[train_index]
+        new_dataset.X_val = original_X_train[test_index]
+        new_dataset.y_val = original_y_train[test_index]
+        _, _, scorings, hs = grid_search_multi(eval, new_dataset, numprocessors, return_all=True, **hyperparameters)
+        scores.append(list(scorings))
+        hp = hs
+    new_dataset.X_train = original_X_train
+    new_dataset.y_train = original_y_train
+    new_dataset.X_val = None
+    new_dataset.y_val = None
+    best_score = np.mean(np.array(scores), axis=0)
+    i = np.argmax(best_score)
+    return best_score[i], hp[i]
 
 def eval(data, hyperparameters):
     model = DebiasedModel(**hyperparameters)
     model.fit(data)
     predictions = model.predict(data.X_val)
-    predictions = np.array([0 if p < 0.5 else 1 for p in predictions])
+    predictions = np.array([0 if p < 0.5 else 1 for p in predictions]) # change this is make more output nodesl; take max prob
     
     f1s = []
     for a in [11, 17, 18, 19, 20]:
@@ -220,7 +250,6 @@ def eval(data, hyperparameters):
     
 
 def stratified_f1(x, truth, predictions, index):
-
     f1s_pos = {}
     f1s_neg = {}
     values = x[:,index]
@@ -239,28 +268,28 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # create dataset
-    new_dataset = Dataset(args.input, args.predictor, args.scale, val_split=0.1)
+    new_dataset = Dataset(args.input, args.predictor, args.scale, args.percent)
     
     threshold = 0.5
-    hyperparameters = {"latent_dim": [2, 4, 6], "hidden_layers": [[45, 36, 27, 18]], "input_size": [21], "db_weight0":[0.1, 0.001, 0.0001, 0.00001], "db_weight1":[0.1, 0.001, 0.0001, 0.00001], "batches":[50], "num_epochs": [50], "lr":[0.0001]}
-
+    if args.hyperparameters != None:
+        with open(args.hyperparameters, "r") as json_file:
+            hyperparameters = json.load(json_file)
 
     # simple hyperparameter search
-    bh, bscore = grid_search_multi(eval, new_dataset, 4, **hyperparameters)
+    bscore, bh = search(new_dataset, args.kfolds, hyperparameters, args.multiprocess)
     print(f"Best Score: {bscore}")
     print(f"Best hyperparameters: {bh}")
     print()
 
     # create model
-    full_dataset = Dataset(args.input, args.predictor, args.scale)
     model = DebiasedModel(**bh)
-    model.fit(full_dataset)
+    model.fit(new_dataset)
     
     # Evaluate model
-    predictions = model.predict(full_dataset.X_test)
-    predictions = np.array([0 if p < threshold else 1 for p in predictions])
-    print(accuracy_score(full_dataset.y_test, predictions))
-    print(f1_score(full_dataset.y_test, predictions))
-    print(stratified_f1(full_dataset.X_test, full_dataset.y_test, predictions, 20))
-    for name, df in zip(["./data_db/X_train.csv", "./data_db/X_test.csv", "./data_db/y_train.csv", "./data_db/y_test.csv", "./data_db/y_predict.csv"], [full_dataset.X_train, full_dataset.X_test, full_dataset.y_train, full_dataset.y_test, pd.DataFrame(predictions)]):
+    predictions = model.predict(new_dataset.X_test)
+    predictions = np.array([0 if p < threshold else 1 for p in predictions]) # change this is make more output nodesl; take max prob
+    print(accuracy_score(new_dataset.y_test, predictions))
+    print(f1_score(new_dataset.y_test, predictions))
+    print(stratified_f1(new_dataset.X_test, new_dataset.y_test, predictions, 20))
+    for name, df in zip([os.path.join(args.directory, "X_train.csv"), os.path.join(args.directory, "X_test.csv"), os.path.join(args.directory, "y_train.csv"), os.path.join(args.directory, "y_test.csv"), os.path.join(args.directory, "y_predict.csv")], [new_dataset.X_train, new_dataset.X_test, new_dataset.y_train, new_dataset.y_test, pd.DataFrame(predictions)]):
         pd.DataFrame(df).to_csv(name)

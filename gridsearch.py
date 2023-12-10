@@ -40,7 +40,7 @@ def combos(**params):
 
     return all_combos
 
-def grid_search_multi(evaluate, data, workers, **params):
+def grid_search_multi(evaluate, data, workers, return_all=False, **params):
    
     hyperparameters = combos(**params)
     print(f"Number of fits to make: {len(hyperparameters)}")
@@ -50,9 +50,12 @@ def grid_search_multi(evaluate, data, workers, **params):
 
     best_model_index = -1
     best_model_performance = -1
+    results = list(results)
     for i, result in enumerate(results):
         if result > best_model_performance:
             best_model_index = i
             best_model_performance = result
-    
-    return hyperparameters[best_model_index], best_model_performance
+    if return_all:
+        return hyperparameters[best_model_index], best_model_performance, results, hyperparameters
+    else:
+        return hyperparameters[best_model_index], best_model_performance
