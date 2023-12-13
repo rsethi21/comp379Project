@@ -1,3 +1,4 @@
+import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
 import pandas as pd
 from sklearn.metrics import accuracy_score, f1_score
@@ -9,7 +10,8 @@ from sklearn.metrics import confusion_matrix
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-df = pd.read_csv("diabetes.csv")
+
+df = pd.read_csv("balanced_data.csv")
 
 #specify the columns to scale
 columns_to_scale = ['BMI', 'Age', 'Education', 'GenHlth', 'MentHlth', 'PhysHlth']

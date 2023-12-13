@@ -18,6 +18,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("-i", "--input", help="input path to diabetes file", required=True)
 parser.add_argument("-p", "--predictor", help="name of prediction column", required=True)
 parser.add_argument("-s", "--scale", help="columns to scale", nargs="*", required=False, default=[])
+parser.add_argument("-o", "--output", help="output size", required=True, type=int)
 
 class Dataset:
     def __init__(self, filepath, predictor, scale_columns, split=0.2, val_split=None, rs = 4):
@@ -51,11 +52,14 @@ class Dataset:
         self.pos_indices = np.where(self.y_train == 1.0)[0]
         if return_data:
             return self.X_train[self.pos_indices]
+        print("Positive indices calculated:", self.pos_indices)  # Add this line for debugging
 
     def get_negative_indices(self, return_data=False):
         self.neg_indices = np.where(self.y_train == 0.0)[0]
         if return_data:
             return self.X_train[self.neg_indices]
+        
+
 
     def prepare_batches(self, batch_size, pos_probability = None, neg_probability = None):
         if len(self.X_train) % batch_size != 0:

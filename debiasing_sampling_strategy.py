@@ -1,5 +1,16 @@
 from imblearn.over_sampling import RandomOverSampler
 import pandas as pd
+from sklearn.preprocessing import MinMaxScaler
+import pandas as pd
+from sklearn.metrics import accuracy_score, f1_score
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import make_pipeline
+import numpy as np
+from sklearn.metrics import confusion_matrix
+import matplotlib.pyplot as plt
+import seaborn as sns
+
 
 
 data = pd.read_csv('diabetes.csv')
@@ -42,3 +53,5 @@ balanced_data = pd.concat(balanced_data, axis=0)
 balanced_data.to_csv('balanced_data.csv', index=False)
 
 # Now 'balanced_data' contains the balanced dataset for each income level
+
+
