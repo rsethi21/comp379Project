@@ -64,7 +64,7 @@ class Dataset:
         return X_batches, y_batches
 
 class FFM(tf.keras.Model):
-    def __init__(self, hidden_layers=[18, 15, 12, 9], output_size=1, num_epochs=50, batches=50, lr=0.0001):
+    def __init__(self, hidden_layers=[45, 36, 27, 18], output_size=1, num_epochs=50, batches=50, lr=0.0001):
         super(FFM, self).__init__()
         self.encoder_portion = self.encoder(hidden_layers, output_size)
         self.num_epochs = num_epochs
@@ -173,12 +173,12 @@ if __name__ == "__main__":
         with open(args.hyperparameters, "r") as json_file:
             hyperparameters = json.load(json_file)
 
-    # bscore, bh = search(new_dataset, args.kfolds, hyperparameters, args.multiprocess, args.percent)
+    # bscore, bh = search(new_dataset, args.kfolds, hyperparameters, args.multiprocess)
     # print(f"Best Score: {bscore}")
     # print(f"Best hyperparameters: {bh}")
     # print()
 
-    bh = {"hidden_layers": [45, 36, 27, 18], "output_size": args.output, "num_epochs": 50, "batches": 50, "lr": 0.0001}
+    bh = {"hidden_layers": [27, 18], "output_size": args.output, "num_epochs": 50, "batches": 50, "lr": 0.01}
 
     # create model
     model = FFM(**bh)
@@ -189,6 +189,6 @@ if __name__ == "__main__":
     predictions = np.array([0 if p < threshold else 1 for p in predictions]) # change this if more output nodes (take max prob)
     print(accuracy_score(new_dataset.y_test, predictions))
     print(f1_score(new_dataset.y_test, predictions))
-    print(stratified_f1(new_dataset.X_test, new_dataset.y_test, predictions, 20))
+    print(stratified_f1(new_dataset.X_test, new_dataset.y_test, predictions, 19))
     for name, df in zip([os.path.join(args.directory, "X_train.csv"), os.path.join(args.directory, "X_test.csv"), os.path.join(args.directory, "y_train.csv"), os.path.join(args.directory, "y_test.csv"), os.path.join(args.directory, "y_predict.csv")], [new_dataset.X_train, new_dataset.X_test, new_dataset.y_train, new_dataset.y_test, pd.DataFrame(predictions)]):
         pd.DataFrame(df).to_csv(name)

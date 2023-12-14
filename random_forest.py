@@ -119,5 +119,5 @@ if __name__ == "__main__":
         model.fit(dataset.X_train, dataset.y_train)
     
     print(evaluate(dataset.y_test, model.predict(dataset.X_test), args.output))
-    print(stratified_f1(dataset.X_test, dataset.y_test, model.predict(dataset.X_test), 20))
+    print(stratified_f1(dataset.X_test, dataset.y_test, model.predict(dataset.X_test), 19))
     save(model, dataset, args.output)
