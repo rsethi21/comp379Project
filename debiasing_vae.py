@@ -276,11 +276,21 @@ if __name__ == "__main__":
             hyperparameters = json.load(json_file)
 
     # simple hyperparameter search
-    bscore, bh = search(new_dataset, args.kfolds, hyperparameters, args.multiprocess)
-    print(f"Best Score: {bscore}")
-    print(f"Best hyperparameters: {bh}")
-    print()
+    # bscore, bh = search(new_dataset, args.kfolds, hyperparameters, args.multiprocess)
+    # print(f"Best Score: {bscore}")
+    # print(f"Best hyperparameters: {bh}")
+    # print()
 
+    # after doing selection
+    bh = {"latent_dim": 3,
+    "hidden_layers": [27, 18],
+    "input_size": 21,
+    "db_weight0": 0.000001,
+    "db_weight1": 0.000001,
+    "batches": 50,
+    "num_epochs": 50,
+    "lr": 0.01
+}
     # create model
     model = DebiasedModel(**bh)
     model.fit(new_dataset)

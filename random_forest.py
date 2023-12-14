@@ -26,7 +26,8 @@ class Dataset:
     def __init__(self, filepath, predictor, scale_columns, split=0.2, val_split=None, rs = 4):
         self.rs = rs
         self.open_dataset(filepath)
-        self.scale_data(scale_columns)
+        if scale_columns != None:
+            self.scale_data(scale_columns)
         self.separate_samples(self.data, predictor, split)
 
     def open_dataset(self, filepath):
@@ -119,5 +120,5 @@ if __name__ == "__main__":
         model.fit(dataset.X_train, dataset.y_train)
     
     print(evaluate(dataset.y_test, model.predict(dataset.X_test), args.output))
-    print(stratified_f1(dataset.X_test, dataset.y_test, model.predict(dataset.X_test), 19))
+    print(stratified_f1(dataset.X_test, dataset.y_test, model.predict(dataset.X_test), 20))
     save(model, dataset, args.output)
